@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include:
+      - master
+  paths:
+    exclude:
+      - azure-pipelines-with-buildnumber.yml
+      - azure-pipelines.yml
+      - azure-pipelines-04-helm.yml
+
+variables:
+  - group: aks
+
+pool:
+ name: devops-pool
+  
+stages:
+- stage: checkout
+  jobs:
+  - job: checkout_code
+    workspace:
+      clean: all
+    steps:
+    - checkout: self
+
+- stage: docker_build
+  dependsOn: checkout
+  jobs:
+  - job: docker_build_job
+    steps:
+    - script: |
+        docker build -t deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber) .
+      displayName: Docker Build
+
+    - script: |
+        az login --service-principal --username "$AZURE_CLIENT_ID" --password "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+
+        az acr login --name deveuksacr01
+
+        docker push deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+      displayName: Login and Push to ACR
+
+
+- stage: deploy_aks
+  dependsOn: docker_build
+  jobs:
+  - deployment: deploy_to_aks
+    displayName: Deploy to AKS
+    environment: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+          - script: |
+              az login --service-principal --username "$AZURE_CLIENT_ID" --password "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+
+              az aks get-credentials --resource-group mc_devops_rg --name dev-euks-aks-01 --overwrite-existing
+
+              kubelogin convert-kubeconfig -l azurecli
+
+              cd ./helm/sampleapp
+
+              helm upgrade --install sampleapp . --set image.tag=$(Build.BuildNumber)
+
+              #kubectl rollout status deployment/sampleapp
+            displayName: Deploy to AKS
