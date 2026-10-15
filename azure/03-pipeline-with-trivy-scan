@@ -1,0 +1,139 @@
+trigger:
+  branches:
+    include:
+      - master
+  paths:
+    exclude:
+      - azure-pipelines-with-buildnumber.yml
+      - azure-pipelines.yml
+      - azure-pipelines-1.yml
+
+variables:
+  - group: aks
+
+pool:
+ name: devops-pool
+  
+stages:
+- stage: checkout
+  jobs:
+  - job: checkout_code
+    steps:
+    - checkout: self
+
+- stage: docker_build
+  dependsOn: checkout
+  jobs:
+  - job: docker_build_job
+    steps:
+    - script: |
+        docker build -t deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber) .
+      displayName: Docker Build
+
+- stage: trivy_scan
+  dependsOn: docker_build
+  jobs:
+  - job: trivy_scan_job
+    steps:
+    - checkout: none
+        # --exit-code 1 fails the pipeline if HIGH/CRITICAL vulnerabilities are found
+        # --exit-code 0 only reports them and lets the pipeline continue
+    - script: |
+        trivy image \
+          --severity HIGH,CRITICAL \
+          --exit-code 0 \
+          --no-progress \
+          deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+      displayName: Trivy Scan
+
+
+    - script: |
+        az login --service-principal \
+          --username "$AZURE_CLIENT_ID" \
+          --password "$AZURE_CLIENT_SECRET" \
+          --tenant "$AZURE_TENANT_ID"
+
+        az acr login --name deveuksacr01
+
+        docker push deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+      displayName: Login and Push to ACR
+      env:
+        AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+        AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
+        AZURE_TENANT_ID: $(AZURE_TENANT_ID)
+
+# - stage: deploy_aks
+#   dependsOn: docker_build
+#   jobs:
+#   - job: deploy_to_aks
+#     steps:
+#     - checkout: self
+
+#     - script: |
+#         az login --service-principal \
+#           --username "$AZURE_CLIENT_ID" \
+#           --password "$AZURE_CLIENT_SECRET" \
+#           --tenant "$AZURE_TENANT_ID"
+
+#         az aks get-credentials \
+#           --resource-group mc_devops_rg \
+#           --name dev-euks-aks-01
+        
+#         kubelogin convert-kubeconfig -l azurecli
+
+#         sed -i "s/IMAGE.TAG/$(Build.BuildNumber)/g" deployment.yaml
+
+#         kubectl apply -f deployment.yaml
+#         kubectl rollout status deployment/sampleapp
+
+#       displayName: Deploy to AKS
+#       env:
+#         AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+#         AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
+#         AZURE_TENANT_ID: $(AZURE_TENANT_ID)
+
+
+##############################################################
+# Demo how similar jobs can be part of one stage
+# Docker stage as one, with different jobs. 
+# The eg above has different stages for each job in this pipeline
+##############################################################
+
+# - stage: docker
+#   dependsOn: checkout
+#   jobs:
+
+#   - job: docker_build
+#     steps:
+#     - script: |
+#         docker build -t deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber) .
+#       displayName: Docker Build
+
+#   - job: trivy_scan
+#     dependsOn: docker_build
+#     steps:
+#     - checkout: none
+#     - script: |
+#         # --exit-code 1 fails the pipeline if HIGH/CRITICAL vulnerabilities are found
+#         # --exit-code 0 only reports them and lets the pipeline continue
+#         trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+#       displayName: Trivy Scan
+
+#   - job: docker_push
+#     dependsOn: trivy_scan
+#     steps:
+#     - checkout: none
+#     - script: |
+#         az login --service-principal \
+#           --username "$AZURE_CLIENT_ID" \
+#           --password "$AZURE_CLIENT_SECRET" \
+#           --tenant "$AZURE_TENANT_ID"
+
+#         az acr login --name deveuksacr01
+
+#         docker push deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+#       displayName: Login and Push to ACR
+#       env:
+#         AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+#         AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
+#         AZURE_TENANT_ID: $(AZURE_TENANT_ID)
