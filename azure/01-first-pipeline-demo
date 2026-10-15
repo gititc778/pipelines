@@ -1,0 +1,87 @@
+trigger:
+ branches:
+   include:
+     - master
+ paths:
+  exclude:
+    - azure-pipelines.yml
+    - azure-pipelines-with-buildnumber.yml
+
+pool:
+ name: devops-pool
+
+# for demo only: use library for variables
+
+# variables:
+#   AZURE_CLIENT_ID: "75ec724b-7396-452f-a43b-8cb79a459ea7"
+#   AZURE_TENANT_ID: "2b32b1fa-7899-482e-a6de-be99c0ff5516"
+#   AZURE_CLIENT_SECRET: ""
+
+
+
+stages:
+ - stage: checkout
+   jobs:
+     - job: checkout_code
+       steps:
+        - checkout: self
+
+ - stage: docker_build
+   jobs:
+    - job: docker_build_job
+      steps: 
+        - script: docker build -t deveuksacr01.azurecr.io/sampleapp:v1.1 .  #deveuksacr01.azurecr.io/sampleapp:v1.1
+          displayName: docker_build
+
+        - script: |
+            az login --service-principal \
+              --username "$AZURE_CLIENT_ID" \
+              --password "$AZURE_CLIENT_SECRET" \
+              --tenant "$AZURE_TENANT_ID"
+            az acr login --name deveuksacr01
+          displayName: azure_login
+
+        - script: docker push deveuksacr01.azurecr.io/sampleapp:v1.1
+          displayName: docker_push
+
+        # You can deploy using a script same as above
+        # but this is CD part of your pipeline, we will use deployment stage, we get env and approval gates with that as well
+
+        # - script: |
+        #     az aks get-credentials \
+        #     --resource-group mc_devops_rg \
+        #     --name dev-euks-aks-01
+
+        #     kubectl set image deployment/sampleapp \
+        #     sampleapp=deveuksacr01.azurecr.io/sampleapp:v1.1
+
+        #     kubectl rollout status deployment/sampleapp
+        #   displayName: Deploy to AKS
+
+
+ - stage: deploy_aks
+   dependsOn: docker_build
+   jobs:
+   - deployment: deploy_to_aks
+     displayName: Deploy to AKS
+     environment: dev
+     strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - script: |
+              az login --service-principal \
+              --username "$AZURE_CLIENT_ID" \
+              --password "$AZURE_CLIENT_SECRET" \
+              --tenant "$AZURE_TENANT_ID"
+
+              az aks get-credentials \
+                --resource-group mc_devops_rg \
+                --name dev-euks-aks-01
+              
+              kubelogin convert-kubeconfig -l azurecli
+
+              kubectl apply -f deployment.yaml
+
+            displayName: Deploy application
