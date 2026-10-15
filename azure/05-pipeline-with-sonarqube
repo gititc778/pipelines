@@ -1,0 +1,164 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+ branches:
+   include:
+     - master
+ paths:
+  exclude:
+    - azure-pipelines.yml
+
+pool:  
+ name: devops-pool
+
+variables:
+ - group: aks
+
+stages:
+  - stage: checkout
+    jobs:
+      - job: checkout_code
+        steps:
+          - checkout: self
+            fetchDepth: 0   # downloads the full history of the repository, every commit back to the first one.
+
+  - stage: sonar_analysis
+    displayName: SonarQube Analysis
+    jobs:
+      - job: sonar_analysis
+        steps:
+          - checkout: none
+
+          - task: SonarQubePrepare@8
+            inputs:
+              SonarQube: 'sonarqube-svcn'
+              scannerMode: 'dotnet'
+              projectKey: '$(Build.Repository.Name)'
+              projectName: '$(Build.Repository.Name)'
+              extraProperties: |
+                sonar.qualitygate.wait=true
+                sonar.qualitygate.timeout=600
+                sonar.exclusions=**/obj/**
+
+          - task: DotNetCoreCLI@2
+            displayName: dotnet build
+            inputs:
+              command: 'build'
+              projects: '**/*.csproj'
+              arguments: '--configuration Release'
+
+          - task: SonarQubeAnalyze@8
+            displayName: Sonar Analyze
+
+          - task: SonarQubePublish@8
+            displayName: Sonar Publish
+            inputs:
+              pollingTimeoutSec: '600'
+
+
+  # - stage: docker_build
+  #   jobs:
+  #     - job: docker_build_job
+  #       steps:
+  #         - script: docker build -t deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber) .
+          
+  # - stage: trivy_scan
+  #   jobs:
+  #   - job: trivy_scan_job
+  #     steps:
+  #     - checkout: none
+  #         # --exit-code 1 fails the pipeline if HIGH/CRITICAL vulnerabilities are found
+  #         # --exit-code 0 only reports them and lets the pipeline continue
+  #     - script: |
+  #         trivy image \
+  #           --severity HIGH,CRITICAL \
+  #           --exit-code 0 \
+  #           --no-progress \
+  #           deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+  #       displayName: Trivy Scan
+
+  # - stage: az_login
+  #   jobs:
+  #   - job: az_login
+  #     steps:
+  #      - script: |
+
+  #           az login --service-principal \
+  #             --username "$AZURE_CLIENT_ID" \
+  #             --password "$AZURE_CLIENT_SECRET" \
+  #             --tenant "$AZURE_TENANT_ID"
+
+  #           az acr login --name deveuksacr01
+
+  # - stage: docker_push
+  #   jobs:
+  #   - job: docker_push
+  #     steps:
+  #      - script: docker push deveuksacr01.azurecr.io/sampleapp:$(Build.BuildNumber)
+
+
+  # - stage: deploy_aks_dev
+  #   jobs:
+  #   - deployment: deploy_to_aks_dev
+  #     displayName: Deploy to AKS dev
+  #     environment: dev
+  #     strategy:
+  #      runOnce:
+  #       deploy:
+  #         steps:
+  #         - checkout: none
+  #         - script: |
+  #             az login --service-principal \
+  #             --username "$AZURE_CLIENT_ID" \
+  #             --password "$AZURE_CLIENT_SECRET" \
+  #             --tenant "$AZURE_TENANT_ID"
+
+  #             az aks get-credentials \
+  #               --resource-group mc_devops_rg \
+  #               --name dev-euks-aks-01 --overwrite-existing
+              
+  #             kubelogin convert-kubeconfig -l azurecli
+
+  #             cd ./helm/sampleapp
+
+  #             helm upgrade --install sampleapp -n dev . --set image.tag=$(Build.BuildNumber)
+
+  #           displayName: Deploy application
+
+  # - stage: deploy_aks_prod
+  #   jobs:
+  #   - deployment: deploy_to_aks_prod
+  #     displayName: Deploy to AKS prod
+  #     environment: prod
+  #     strategy:
+  #      runOnce:
+  #       deploy:
+  #         steps:
+  #         - checkout: none
+  #         - script: |
+  #             az login --service-principal \
+  #             --username "$AZURE_CLIENT_ID" \
+  #             --password "$AZURE_CLIENT_SECRET" \
+  #             --tenant "$AZURE_TENANT_ID"
+
+  #             az aks get-credentials \
+  #               --resource-group mc_devops_rg \
+  #               --name dev-euks-aks-01 --overwrite-existing
+              
+  #             kubelogin convert-kubeconfig -l azurecli
+
+  #             cd ./helm/sampleapp
+
+  #             helm upgrade --install sampleapp -n prod . --set image.tag=$(Build.BuildNumber)
+
+  #           displayName: Deploy application
+
+
+
+
+
+
+                
